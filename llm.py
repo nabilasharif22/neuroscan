@@ -6,16 +6,15 @@
 # 1. Load environment variables
 from dotenv import load_dotenv
 import os
+from openai import OpenAI
 
 load_dotenv()
 
 # 2. Get API key from .env
 api_key = os.getenv("OPENAI_API_KEY")
 
-# 3. Create OpenAI client  
-from openai import OpenAI
-
-client = OpenAI(api_key=api_key)
+# 3. Create OpenAI client only if key exists
+client = OpenAI(api_key=api_key) if api_key else None
 
 # ==========================================
 # LLM EXTRACTION (MOCK VERSION)

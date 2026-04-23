@@ -1,96 +1,210 @@
 # ==========================================
-# INTERACTIVE PLOTLY DIAGRAM
+# visualization.py (ROBUST VERSION)
 # ==========================================
 
 import plotly.graph_objects as go
+from bug_checks import build_safe_graph, normalize_var
 
-def draw_experiment_diagram(exp, rel_filter, selected_node):
 
-    fig = go.Figure()
+# ------------------------------------------
+# 2. Extract + clean nodes
+# ------------------------------------------
+def extract_nodes(experiment):
+
+    inputs = set()
+    outputs = set()
+
+    for var in experiment.get("manipulated_variables", []):
+        normalized = normalize_var(var)
+        if normalized:
+            inputs.add(normalized)
+
+    for var in experiment.get("measured_variables", []):
+        normalized = normalize_var(var)
+        if normalized:
+            outputs.add(normalized)
+
+    return inputs, outputs
+
+
+# ------------------------------------------
+# 3. Build graph safely
+# ------------------------------------------
+def build_graph(experiment):
+
+    inputs, outputs = extract_nodes(experiment)
+
+    links = experiment.get("model_links", [])
+
+    edges = []
+    all_nodes = set(inputs) | set(outputs)
+
+    for link in links:
+        exp_var = normalize_var(link.get("experiment_variable"))
+        model_comp = normalize_var(link.get("model_component"))
+
+        # Skip completely empty links
+        if not exp_var and not model_comp:
+            continue
+
+        # Auto-add missing nodes
+        if exp_var:
+            all_nodes.add(exp_var)
+        if model_comp:
+            all_nodes.add(model_comp)
+
+        edges.append({
+            "source": exp_var,
+            "target": model_comp,
+            "type": link.get("relationship", "unknown"),
+            "confidence": link.get("confidence", 0.5)
+        })
+
+    return inputs, outputs, all_nodes, edges
+
+
+# ------------------------------------------
+# 4. Layout (journal-style)
+# ------------------------------------------
+def compute_layout(inputs, outputs, all_nodes):
 
     pos = {}
 
-    # --------------------------------------
-    # BUILD NODE POSITIONS
-    # --------------------------------------
-    nodes = []
+    inputs = sorted(inputs)
+    outputs = sorted(outputs)
+    middle = sorted(all_nodes - set(inputs) - set(outputs))
 
-    for v in exp["manipulated_variables"]:
-        nodes.append((v, 0))
+    # Left column (inputs)
+    for i, node in enumerate(inputs):
+        pos[node] = (-1, i)
 
-    for link in exp["model_links"]:
-        nodes.append((link["model_component"], 1))
+    # Middle column (latent / model)
+    for i, node in enumerate(middle):
+        pos[node] = (0, i)
 
-    for v in exp["measured_variables"]:
-        nodes.append((v, 2))
+    # Right column (outputs)
+    for i, node in enumerate(outputs):
+        pos[node] = (1, i)
 
-    nodes = list(set(nodes))
+    return pos
 
-    for i, (name, col) in enumerate(nodes):
-        pos[name] = (col, -i)
 
-    # --------------------------------------
-    # DRAW NODES
-    # --------------------------------------
-    for name, col in nodes:
+# ------------------------------------------
+# 5. Draw edges safely
+# ------------------------------------------
+def make_edges(edges, pos):
 
-        style = dict(size=40, color="lightblue", opacity=0.8)
+    edge_x = []
+    edge_y = []
+    for edge in edges:
 
-        if selected_node != "None":
-            if name == selected_node:
-                style = dict(size=55, color="red", opacity=1)
-            else:
-                style["opacity"] = 0.2
+        src = edge["source"]
+        tgt = edge["target"]
 
-        fig.add_trace(go.Scatter(
-            x=[pos[name][0]],
-            y=[pos[name][1]],
-            mode="markers+text",
-            text=[name],
-            marker=style
-        ))
+        if src not in pos or tgt not in pos:
+            # Skip invalid edges (no crash)
+            continue
 
-    # --------------------------------------
-    # DRAW EDGES
-    # --------------------------------------
-    for link in exp["model_links"]:
+        x0, y0 = pos[src]
+        x1, y1 = pos[tgt]
 
-        rel = link["relationship"]
-        conf = link.get("confidence", 0.7)
+        edge_x += [x0, x1, None]
+        edge_y += [y0, y1, None]
 
-        # default faded
-        opacity = 0.1
-        width = 1
+    return edge_x, edge_y
 
-        if rel in rel_filter:
-            opacity = conf
-            width = 2
 
-        if selected_node != "None":
-            if selected_node in [link["experiment_variable"], link["model_component"]]:
-                opacity = 1
-                width = 4
+# ------------------------------------------
+# 6. Draw nodes
+# ------------------------------------------
+def make_nodes(pos, inputs, outputs, selected_node=None):
 
-        fig.add_annotation(
-            x=pos[link["model_component"]][0],
-            y=pos[link["model_component"]][1],
-            ax=pos[link["experiment_variable"]][0],
-            ay=pos[link["experiment_variable"]][1],
-            showarrow=True,
-            arrowhead=2,
-            arrowwidth=width,
-            opacity=opacity,
-            text=rel
+    x = []
+    y = []
+    text = []
+    color = []
+    size = []
+
+    for node, (px, py) in pos.items():
+
+        x.append(px)
+        y.append(py)
+        text.append(node)
+
+        if node in inputs:
+            base_color = "royalblue"
+        elif node in outputs:
+            base_color = "darkorange"
+        else:
+            base_color = "seagreen"
+
+        if selected_node and node == selected_node:
+            color.append("crimson")
+            size.append(24)
+        else:
+            color.append(base_color)
+            size.append(18)
+
+    return x, y, text, color, size
+
+
+# ------------------------------------------
+# 7. MAIN FUNCTION
+# ------------------------------------------
+def draw_experiment_diagram(experiment, rel_filter=None, selected_node=None):
+
+    graph = build_safe_graph(experiment, rel_filter=rel_filter)
+    inputs = graph["inputs"]
+    outputs = graph["outputs"]
+    all_nodes = graph["all_nodes"]
+    edges = graph["edges"]
+
+    pos = compute_layout(inputs, outputs, all_nodes)
+
+    edge_x, edge_y = make_edges(edges, pos)
+    edge_trace = go.Scatter(
+        x=edge_x,
+        y=edge_y,
+        line=dict(width=1.8, color="gray"),
+        hoverinfo="none",
+        mode="lines",
+    )
+
+    normalized_selected = normalize_var(selected_node)
+    node_x, node_y, node_text, node_color, node_size = make_nodes(
+        pos,
+        inputs,
+        outputs,
+        selected_node=normalized_selected,
+    )
+
+    node_trace = go.Scatter(
+        x=node_x,
+        y=node_y,
+        mode='markers+text',
+        text=node_text,
+        textposition="top center",
+        hoverinfo='text',
+        marker=dict(
+            size=node_size,
+            color=node_color,
+            line=dict(width=2, color='black')
         )
+    )
 
-    # --------------------------------------
-    # CLEAN LAYOUT
-    # --------------------------------------
-    fig.update_layout(
-        title=exp["name"],
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        plot_bgcolor="white"
+    # Figure
+    fig = go.Figure(
+        data=[edge_trace, node_trace],
+        layout=go.Layout(
+            title="Experiment ↔ Model Mapping",
+            title_x=0.5,
+            showlegend=False,
+            hovermode='closest',
+            margin=dict(b=20, l=20, r=20, t=40),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            plot_bgcolor="white"
+        )
     )
 
     return fig
