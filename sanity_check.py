@@ -28,11 +28,15 @@ def run_sanity_check():
             {"experiment_variable": None, "model_component": None},
             "invalid-link",
         ],
+        "outcome_links": [
+            {"model_component": "prediction error", "measured_variable": "learning", "relationship": "causes", "confidence": 0.84},
+            {"model_component": None, "measured_variable": "learning"},
+        ],
     }
 
     fig = draw_experiment_diagram(
         malformed_experiment,
-        rel_filter=["tests", "controls"],
+        rel_filter=["tests", "controls", "causes"],
         selected_node="dopamine",
     )
 

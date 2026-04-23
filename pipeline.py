@@ -2,13 +2,14 @@
 # pipeline.py (ROBUST VERSION)
 # ==========================================
 
-from llm import extract_experiment_model
-from segmentation import segment_text
+from llm import extract_experiment_model, get_llm_status
+from segmentation import segment_text, extract_paper_context
 from bug_checks import (
     guard_input_text,
     validate_llm_output,
     filter_experiments,
     collect_all_nodes,
+    normalize_var,
 )
 
 
@@ -21,20 +22,31 @@ def analyze_text(text, rel_filter=None, min_confidence=0.0):
     text → LLM → validation → filtering → output
     """
 
+    initial_llm_status = get_llm_status()
+
     cleaned_text, input_issues = guard_input_text(text)
     if not cleaned_text:
-        return {"experiments": [], "all_nodes": [], "issues": input_issues}
+        return {
+            "experiments": [],
+            "all_nodes": [],
+            "issues": input_issues,
+            "llm_status": initial_llm_status,
+        }
 
     # --------------------------------------
     # Step 1: Segment text + call LLM
     # --------------------------------------
     segments = segment_text(cleaned_text) or [cleaned_text]
 
+    # Extract title+abstract once — prepended to every LLM prompt so
+    # each chunk knows which paper it belongs to (cross-chunk continuity).
+    paper_context = extract_paper_context(cleaned_text)
+
     all_experiments = []
     issues = list(input_issues)
 
     for segment in segments:
-        raw_output = extract_experiment_model(segment)
+        raw_output = extract_experiment_model(segment, paper_context=paper_context)
 
         if raw_output is None:
             issues.append("LLM returned None for one segment.")
@@ -43,6 +55,8 @@ def analyze_text(text, rel_filter=None, min_confidence=0.0):
         clean_output, validation_issues = validate_llm_output(raw_output)
         issues.extend(validation_issues)
         all_experiments.extend(clean_output.get("experiments", []))
+
+    all_experiments = _merge_similar_experiments(all_experiments)
 
     # --------------------------------------
     # Step 2: Optional filtering
@@ -54,10 +68,12 @@ def analyze_text(text, rel_filter=None, min_confidence=0.0):
     )
 
     experiments = filtered_output.get("experiments", [])
+    final_llm_status = get_llm_status()
     return {
         "experiments": experiments,
         "all_nodes": collect_all_nodes(experiments),
         "issues": issues,
+        "llm_status": final_llm_status,
     }
 
 
@@ -104,6 +120,79 @@ def merge_experiments(data):
         "measured_variables": list(set(all_measured)),
         "model_links": all_links
     }
+
+
+def _experiment_group_key(experiment):
+    name = normalize_var(experiment.get("name", "unnamed_experiment")) or "unnamed_experiment"
+    manipulated = sorted({normalize_var(item) for item in experiment.get("manipulated_variables", []) if normalize_var(item)})
+    measured = sorted({normalize_var(item) for item in experiment.get("measured_variables", []) if normalize_var(item)})
+    return (name, tuple(manipulated), tuple(measured))
+
+
+def _merge_similar_experiments(experiments):
+    grouped = {}
+
+    for experiment in experiments:
+        key = _experiment_group_key(experiment)
+        if key not in grouped:
+            grouped[key] = {
+                "name": experiment.get("name", "Unnamed Experiment"),
+                "manipulated_variables": list(experiment.get("manipulated_variables", [])),
+                "measured_variables": list(experiment.get("measured_variables", [])),
+                "model_links": list(experiment.get("model_links", [])),
+                "outcome_links": list(experiment.get("outcome_links", [])),
+            }
+            continue
+
+        grouped[key]["manipulated_variables"].extend(experiment.get("manipulated_variables", []))
+        grouped[key]["measured_variables"].extend(experiment.get("measured_variables", []))
+        grouped[key]["model_links"].extend(experiment.get("model_links", []))
+        grouped[key]["outcome_links"].extend(experiment.get("outcome_links", []))
+
+    merged = []
+    for item in grouped.values():
+        unique_manipulated = sorted({value for value in item["manipulated_variables"] if value})
+        unique_measured = sorted({value for value in item["measured_variables"] if value})
+
+        model_seen = set()
+        model_links = []
+        for link in item.get("model_links", []):
+            signature = (
+                link.get("experiment_variable"),
+                link.get("model_component"),
+                link.get("relationship"),
+                link.get("confidence"),
+            )
+            if signature in model_seen:
+                continue
+            model_seen.add(signature)
+            model_links.append(link)
+
+        outcome_seen = set()
+        outcome_links = []
+        for link in item.get("outcome_links", []):
+            signature = (
+                link.get("model_component"),
+                link.get("measured_variable"),
+                link.get("relationship"),
+                link.get("confidence"),
+            )
+            if signature in outcome_seen:
+                continue
+            outcome_seen.add(signature)
+            outcome_links.append(link)
+
+        merged.append(
+            {
+                "name": item.get("name", "Unnamed Experiment"),
+                "manipulated_variables": unique_manipulated,
+                "measured_variables": unique_measured,
+                "model_links": model_links,
+                "outcome_links": outcome_links,
+            }
+        )
+
+    return merged
 
 
 # ------------------------------------------

@@ -30,6 +30,7 @@ python3.11 -m venv venv
 
 ## Features
 - Extract experiment-model relationships
+- Upload `.pdf` or `.txt` papers directly (or paste text)
 - Interactive filtering
 - Highlight causal paths
 - End-to-end bug checks for malformed LLM output
@@ -38,4 +39,3 @@ python3.11 -m venv venv
 ## Next Steps
 - Add OpenAI API in llm.py
 - Improve dataset
-- Add PDF upload
