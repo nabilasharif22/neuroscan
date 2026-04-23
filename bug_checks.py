@@ -105,11 +105,30 @@ def validate_outcome_link(link):
     }
 
 
+def validate_tested_model(value):
+    if not isinstance(value, dict):
+        return {
+            "name": "unknown_model",
+            "family": "unknown",
+            "evidence": "",
+        }
+
+    model_name = normalize_var(value.get("name")) or "unknown_model"
+    family = normalize_var(value.get("family")) or "unknown"
+    evidence = str(value.get("evidence", "")).strip()
+    return {
+        "name": model_name,
+        "family": family,
+        "evidence": evidence,
+    }
+
+
 def validate_experiment(experiment, default_name="Unnamed Experiment"):
     if not isinstance(experiment, dict):
         return None
 
     name = str(experiment.get("name", default_name)).strip() or default_name
+    tested_model = validate_tested_model(experiment.get("tested_model"))
 
     manipulated = []
     for value in _safe_list(experiment.get("manipulated_variables", [])):
@@ -171,6 +190,7 @@ def validate_experiment(experiment, default_name="Unnamed Experiment"):
 
     return {
         "name": name,
+        "tested_model": tested_model,
         "manipulated_variables": sorted(set(manipulated)),
         "measured_variables": sorted(set(measured)),
         "model_links": links,

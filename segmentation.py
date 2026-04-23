@@ -4,6 +4,26 @@
 
 import re
 
+try:
+    from ml_model import (
+        identify_candidate_models,
+        build_model_primer,
+        get_relevance_model,
+        get_relevance_score,
+    )
+except Exception:
+    def identify_candidate_models(text, top_k=4):
+        return []
+
+    def build_model_primer(text, top_k=3):
+        return ""
+
+    def get_relevance_model():
+        return None
+
+    def get_relevance_score(text, model=None):
+        return 0.5
+
 
 SECTION_HEADERS = {
     "abstract",
@@ -329,7 +349,53 @@ def _is_low_signal_section(header, body):
     return False
 
 
-def segment_text(text):
+def _extract_focus_model_terms(text, max_terms=10):
+    candidates = identify_candidate_models(text, top_k=4)
+    ranked_terms = []
+    for candidate in candidates:
+        for term in candidate.get("evidence_terms", []):
+            if term and term not in ranked_terms:
+                ranked_terms.append(term)
+    return ranked_terms[:max_terms]
+
+
+def _resolve_max_segments(text_length, requested_max_segments=None):
+    if requested_max_segments is not None:
+        try:
+            value = int(requested_max_segments)
+        except (TypeError, ValueError):
+            value = 5
+        return max(1, min(12, value))
+
+    if text_length < 6000:
+        return 3
+    if text_length < 15000:
+        return 5
+    if text_length < 30000:
+        return 6
+    return 7
+
+
+def _token_signature(text, max_tokens=120):
+    tokens = re.findall(r"[a-z0-9_\-]+", text.lower())[:max_tokens]
+    return set(token for token in tokens if len(token) > 2)
+
+
+def _is_near_duplicate(chunk_a, chunk_b, threshold=0.88):
+    sig_a = _token_signature(chunk_a)
+    sig_b = _token_signature(chunk_b)
+    if not sig_a or not sig_b:
+        return False
+
+    overlap = len(sig_a & sig_b)
+    min_len = min(len(sig_a), len(sig_b))
+    if min_len == 0:
+        return False
+
+    return (overlap / min_len) >= threshold
+
+
+def segment_text(text, max_segments=None, ml_score_threshold=0.38, llm_top_k=None):
     """
     Splits paper text into neuroscience-relevant chunks for LLM extraction.
     Uses section detection, overlap chunking, relevance scoring, and pruning.
@@ -339,9 +405,14 @@ def segment_text(text):
     if not normalized:
         return []
 
+    segment_cap = _resolve_max_segments(len(normalized), requested_max_segments=max_segments)
+
     sections = _split_sections(normalized)
     if not sections:
         sections = [("", normalized)]
+
+    focus_model_terms = _extract_focus_model_terms(normalized)
+    relevance_model = get_relevance_model()
 
     ranked = []
     position = 0
@@ -350,22 +421,54 @@ def segment_text(text):
             continue
 
         for chunk in _chunk_with_overlap(body):
-            score = _score_segment(chunk, header)
-            ranked.append((position, score, chunk))
+            rule_score = _score_segment(chunk, header)
+            lower_chunk = chunk.lower()
+            if focus_model_terms:
+                term_hits = sum(1 for term in focus_model_terms if term in lower_chunk)
+                rule_score += min(3.0, term_hits * 0.6)
+
+            ml_score = get_relevance_score(chunk, model=relevance_model)
+            combined_score = (0.7 * rule_score) + (0.3 * (ml_score * 10.0))
+
+            ranked.append((position, combined_score, ml_score, chunk))
             position += 1
 
     if not ranked:
         return [normalized]
 
     ranked.sort(key=lambda item: item[1], reverse=True)
-    max_segments = 10
-    selected = ranked[:max_segments]
+    candidate_pool_size = min(len(ranked), max(segment_cap * 3, segment_cap))
+    selected = ranked[:candidate_pool_size]
     selected.sort(key=lambda item: item[0])
 
-    segments = [chunk for _, _, chunk in selected if chunk.strip()]
+    deduped_entries = []
+    for position, combined_score, ml_score, chunk in selected:
+        if not chunk.strip():
+            continue
+        if any(_is_near_duplicate(chunk, existing[3]) for existing in deduped_entries):
+            continue
+        deduped_entries.append((position, combined_score, ml_score, chunk))
+        if len(deduped_entries) >= segment_cap:
+            break
+
+    gate_threshold = max(0.0, min(1.0, float(ml_score_threshold)))
+    threshold_pass = [entry for entry in deduped_entries if entry[2] >= gate_threshold]
+    gated_pool = threshold_pass or deduped_entries
+
+    top_k = llm_top_k if llm_top_k is not None else segment_cap
+    try:
+        top_k = int(top_k)
+    except (TypeError, ValueError):
+        top_k = segment_cap
+    top_k = max(1, min(12, top_k))
+
+    top_ranked = sorted(gated_pool, key=lambda item: item[1], reverse=True)[:top_k]
+    top_ranked.sort(key=lambda item: item[0])
+
+    deduped_segments = [entry[3] for entry in top_ranked if entry[3].strip()]
 
     # Keep at least one chunk even when scoring is weak
-    return segments or [normalized]
+    return deduped_segments or [normalized]
 
 
 def extract_paper_context(text):
@@ -412,5 +515,9 @@ def extract_paper_context(text):
         parts.append(f"Paper title: {title}")
     if abstract_text:
         parts.append(f"Abstract: {abstract_text}")
+
+    model_primer = build_model_primer(normalized, top_k=3)
+    if model_primer:
+        parts.append(model_primer)
 
     return "\n".join(parts)

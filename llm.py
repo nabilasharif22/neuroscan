@@ -64,6 +64,11 @@ def _mock_output():
         "experiments": [
             {
                 "name": "Example Experiment",
+                "tested_model": {
+                    "name": "reinforcement_learning",
+                    "family": "reinforcement-learning",
+                    "evidence": "prediction error and value update terms in text",
+                },
                 "manipulated_variables": ["dopamine"],
                 "measured_variables": ["learning"],
                 "model_links": [
@@ -124,6 +129,11 @@ def _build_prompt(text, paper_context=""):
         '  "experiments": [\n'
         "    {\n"
         '      "name": "string",\n'
+        '      "tested_model": {\n'
+        '        "name": "string",\n'
+        '        "family": "string",\n'
+        '        "evidence": "string"\n'
+        "      },\n"
         '      "manipulated_variables": ["string"],\n'
         '      "measured_variables": ["string"],\n'
         '      "model_links": [\n'
@@ -146,11 +156,15 @@ def _build_prompt(text, paper_context=""):
         "  ]\n"
         "}\n\n"
         "Rules:\n"
+        "- Always identify the tested computational model for each experiment in tested_model.\n"
+        "- Use canonical model names when possible (e.g., reinforcement_learning, bayesian_inference, active_inference, drift_diffusion_model).\n"
+        "- Model components must be specific to the tested model; avoid generic placeholders like 'model' or 'parameter' alone.\n"
         "- Extract specific variables, not generic words like 'study', 'group', or 'task'.\n"
         "- Keep variable names concise and canonical (e.g., 'dopamine', 'prediction error', 'choice accuracy').\n"
         "- Treat interventions/stimuli/drug doses as manipulated variables when explicit.\n"
         "- Treat behavioral/neural readouts as measured variables when explicit.\n"
         "- Use outcome_links to connect model components to measured variables whenever evidence exists.\n"
+        "- Prefer one coherent experiment object per tested model/experiment pair instead of fragmented partial objects.\n"
         "- If multiple experiments exist, create separate experiment objects.\n"
         "- If uncertain, still return best-effort fields.\n"
         "- Keep confidence in [0.0, 1.0].\n"

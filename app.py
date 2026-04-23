@@ -43,9 +43,28 @@ def extract_uploaded_text(uploaded_file):
 
     return "", "Unsupported file type. Please upload a .pdf or .txt file."
 
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def run_analysis_cached(
+    text,
+    rel_filter_tuple,
+    min_confidence,
+    max_segments,
+    ml_score_threshold,
+    llm_top_k,
+):
+    return analyze_text(
+        text,
+        rel_filter=list(rel_filter_tuple),
+        min_confidence=min_confidence,
+        max_segments=max_segments,
+        ml_score_threshold=ml_score_threshold,
+        llm_top_k=llm_top_k,
+    )
+
 st.set_page_config(
     page_title="NeuroScan — Computational Model Extractor",
-    page_icon="🧠",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -53,47 +72,131 @@ st.set_page_config(
 # --- Custom academic CSS ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,600;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:wght@400;600;700&display=swap');
+
+:root {
+    --ink: #111827;
+    --muted: #334155;
+    --line: #cbd5e1;
+    --panel: #ffffff;
+    --panel-soft: #f1f5f9;
+    --accent: #1e3a8a;
+}
 
 html, body, [class*="css"] {
     font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    color: var(--ink);
 }
 
-/* Page title */
-h1 { font-family: 'Lora', Georgia, serif !important; font-weight: 600 !important; color: #1a1a2e !important; letter-spacing: -0.3px; }
-h2, h3 { font-family: 'Lora', Georgia, serif !important; color: #1a1a2e !important; }
+[data-testid="stAppViewContainer"] {
+    background: #f3f6fb;
+}
 
-/* Subtle top rule under title */
-.block-container { padding-top: 2rem !important; }
+h1, h2, h3, h4, h5 {
+    font-family: 'Source Serif 4', Georgia, serif !important;
+    color: #0b1220 !important;
+    letter-spacing: -0.2px;
+}
 
-/* Sidebar */
-section[data-testid="stSidebar"] { background: #f4f4f0 !important; border-right: 1px solid #ddd; }
-section[data-testid="stSidebar"] .stMarkdown p { font-size: 0.82rem; color: #444; }
+.block-container {
+    padding-top: 1.5rem !important;
+    max-width: 1280px;
+}
 
-/* Buttons */
+[data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > [data-testid="stVerticalBlockBorderWrapper"] {
+    width: 100%;
+}
+
+section[data-testid="stSidebar"] {
+    background: #e9eef6 !important;
+    border-right: 1px solid var(--line);
+}
+
+section[data-testid="stSidebar"] .stMarkdown p {
+    font-size: 0.82rem;
+    color: #1f2937;
+}
+
+[data-testid="stFileUploader"] {
+    border: 1.5px dashed #94a3b8 !important;
+    border-radius: 10px !important;
+    padding: 0.75rem !important;
+    background: var(--panel-soft) !important;
+}
+
+[data-testid="stFileUploader"] section {
+    align-items: center;
+}
+
+[data-testid="stTextArea"] textarea {
+    border: 1px solid #94a3b8 !important;
+    border-radius: 8px !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+}
+
 div.stButton > button {
-    background: #1d4e8f !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 4px !important;
+    background: var(--accent) !important;
+    color: #fff !important;
+    border: 1px solid #173c80 !important;
+    border-radius: 8px !important;
     font-weight: 600 !important;
-    padding: 0.5rem 1.6rem !important;
-    letter-spacing: 0.3px;
+    padding: 0.52rem 1.2rem !important;
     font-size: 0.9rem !important;
+    box-shadow: 0 2px 6px rgba(30, 58, 138, 0.18);
 }
-div.stButton > button:hover { background: #163d72 !important; }
 
-/* Expander header */
-details summary { font-weight: 600; font-size: 0.9rem; color: #1a1a2e; }
+div.stButton > button:hover {
+    background: #172d6e !important;
+}
 
-/* File uploader */
-[data-testid="stFileUploader"] { border: 1.5px dashed #b0b0b0 !important; border-radius: 6px !important; padding: 0.6rem !important; background: #fafaf8 !important; }
+[data-testid="stMarkdownContainer"] p {
+    color: #0f172a;
+}
 
-/* Caption text */
-.stCaption { color: #666 !important; font-size: 0.77rem !important; }
+[data-testid="stExpander"] p,
+[data-testid="stExpander"] li,
+[data-testid="stExpander"] span {
+    color: #0f172a !important;
+}
 
-/* Divider */
-hr { border: none; border-top: 1px solid #ddd; margin: 1rem 0; }
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] .stCaption {
+    color: #0f172a !important;
+}
+
+[data-baseweb="select"] span,
+[data-baseweb="select"] div,
+[data-baseweb="tag"] span {
+    color: #0f172a !important;
+}
+
+[data-testid="stAlert"] {
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-testid="stAlert"] p,
+[data-testid="stAlert"] div,
+[data-testid="stAlert"] span {
+    color: #111827 !important;
+}
+
+details summary {
+    font-weight: 600;
+    color: #1f2f4d;
+}
+
+.stCaption {
+    color: var(--muted) !important;
+    font-size: 0.78rem !important;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 0.9rem 0 1.1rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -103,12 +206,20 @@ with col_logo:
     st.markdown("<div style='font-size:2.4rem;line-height:1;padding-top:6px'>🧠</div>", unsafe_allow_html=True)
 with col_title:
     st.markdown(
-        "<h1 style='margin:0;font-size:1.9rem'>NeuroScan</h1>"
-        "<p style='margin:0;color:#555;font-size:0.88rem;font-family:Inter,sans-serif'>"
-        "Computational model structure extractor for neuroscience papers</p>",
+        "<h1 style='margin:0;font-size:2rem'>NeuroScan</h1>"
+        "<p style='margin:0.1rem 0 0;color:#4f5d74;font-size:0.9rem;font-family:Inter,sans-serif'>"
+        "A structured framework for extracting experimental manipulations, computational model structure, and measured outcomes from neuroscience literature.</p>",
         unsafe_allow_html=True,
     )
 st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown(
+    "<div style='background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;"
+    "padding:0.8rem 0.95rem;margin-bottom:0.8rem;'>"
+    "<span style='font-size:0.83rem;color:#334155;'>"
+    "Upload a PDF/TXT or paste manuscript text to extract experiment variables, model components, and outcome links."
+    "</span></div>",
+    unsafe_allow_html=True,
+)
 
 if "llm_status" not in st.session_state:
     st.session_state["llm_status"] = get_llm_status()
@@ -118,7 +229,7 @@ llm_status = st.session_state["llm_status"]
 # --- Sidebar ---
 st.sidebar.markdown(
     "<p style='font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;"
-    "color:#888;font-weight:600;margin-bottom:4px'>Extraction Engine</p>",
+    "color:#475569;font-weight:700;margin-bottom:4px'>Extraction Engine</p>",
     unsafe_allow_html=True,
 )
 if llm_status.get("mode") == "api":
@@ -130,17 +241,17 @@ st.sidebar.caption(llm_status.get("message", ""))
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     "<p style='font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;"
-    "color:#888;font-weight:600;margin-bottom:6px'>Graph Legend</p>",
+    "color:#475569;font-weight:700;margin-bottom:6px'>Graph Legend</p>",
     unsafe_allow_html=True,
 )
 st.sidebar.markdown(
-    "<div style='font-size:0.82rem;line-height:1.9'>"
-    "<span style='color:#1d4e8f'>⬤</span>&nbsp; <b>Input</b> — manipulated variable<br>"
-    "<span style='color:#1a6b3c'>⬤</span>&nbsp; <b>Model node</b> — latent component<br>"
-    "<span style='color:#8b3a00'>⬤</span>&nbsp; <b>Output</b> — measured variable<br>"
+    "<div style='font-size:0.82rem;line-height:1.8;color:#1f2937'>"
+    "<span style='color:#1e3a8a'>⬤</span>&nbsp; <b>Input</b> — manipulated variable<br>"
+    "<span style='color:#166534'>⬤</span>&nbsp; <b>Model node</b> — latent component<br>"
+    "<span style='color:#92400e'>⬤</span>&nbsp; <b>Output</b> — measured variable<br>"
     "<span style='color:#b91c1c'>—</span>&nbsp; <b>causes</b>&emsp;"
-    "<span style='color:#b45309'>—</span>&nbsp; <b>modulates</b><br>"
-    "<span style='color:#2563eb'>—</span>&nbsp; <b>tests</b>&emsp;&emsp;"
+    "<span style='color:#a16207'>—</span>&nbsp; <b>modulates</b><br>"
+    "<span style='color:#1d4ed8'>—</span>&nbsp; <b>tests</b>&emsp;&emsp;"
     "<span style='color:#0f766e'>—</span>&nbsp; <b>controls</b><br>"
     "<span style='color:#7c3aed'>—</span>&nbsp; <b>correlates</b><br>"
     "― solid = input→model &nbsp;|&nbsp; ··· dotted = model→output"
@@ -151,7 +262,14 @@ st.sidebar.markdown(
 # ------------------------------------------
 # INPUT PANEL
 # ------------------------------------------
-st.markdown("#### Upload or paste a paper")
+st.markdown(
+    "<div style='display:inline-block;background:#ffffff;border:1px solid #b8c4d9;"
+    "border-radius:8px;padding:0.32rem 0.62rem;margin:0.15rem 0 0.6rem;'>"
+    "<span style='font-family:Source Serif 4,Georgia,serif;font-size:1.04rem;"
+    "font-weight:700;color:#0b1220;letter-spacing:-0.1px'>Manuscript Input</span>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 
 col_upload, col_paste = st.columns([1, 1], gap="large")
 with col_upload:
@@ -195,7 +313,7 @@ if uploaded_file is not None:
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     "<p style='font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;"
-    "color:#888;font-weight:600;margin-bottom:6px'>Filters</p>",
+    "color:#475569;font-weight:700;margin-bottom:6px'>Filters</p>",
     unsafe_allow_html=True,
 )
 
@@ -214,8 +332,40 @@ min_confidence = st.sidebar.slider(
     step=0.05,
 )
 
+speed_mode = st.sidebar.radio(
+    "Extraction speed",
+    options=["Fast", "Balanced", "Thorough"],
+    index=1,
+    help="Fast = fewer segments (quicker). Thorough = more segments (slower, more coverage).",
+)
+
+speed_to_segments = {
+    "Fast": 3,
+    "Balanced": 5,
+    "Thorough": 8,
+}
+max_segments = speed_to_segments.get(speed_mode, 5)
+
+ml_score_threshold = st.sidebar.slider(
+    "ML relevance threshold",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.38,
+    step=0.02,
+    help="Only chunks with ML relevance above this threshold are sent to the LLM (unless none pass).",
+)
+
+llm_top_k = st.sidebar.slider(
+    "LLM top-K chunks",
+    min_value=1,
+    max_value=12,
+    value=max_segments,
+    step=1,
+    help="Maximum number of highest-ranked chunks sent to the LLM.",
+)
+
 st.markdown("<br>", unsafe_allow_html=True)
-analyze_clicked = st.button("⚡ Run Analysis", use_container_width=False)
+analyze_clicked = st.button("Run Analysis", use_container_width=False)
 
 if analyze_clicked:
 
@@ -235,10 +385,13 @@ if analyze_clicked:
 
     start_time = time.perf_counter()
     with st.spinner("Segmenting paper and extracting model structure…"):
-        results = analyze_text(
+        results = run_analysis_cached(
             analysis_text,
-            rel_filter=rel_filter,
-            min_confidence=min_confidence,
+            tuple(rel_filter),
+            min_confidence,
+            max_segments,
+            ml_score_threshold,
+            llm_top_k,
         )
     elapsed_seconds = time.perf_counter() - start_time
     st.success(f"Extraction complete — {elapsed_seconds:.2f} s")
@@ -272,7 +425,7 @@ if analyze_clicked:
     if issues:
         with st.expander("⚠ Validation notices", expanded=False):
             for issue in issues:
-                st.markdown(f"<span style='font-size:0.82rem;color:#666'>• {issue}</span>", unsafe_allow_html=True)
+                st.markdown(f"<span style='font-size:0.84rem;color:#0f172a'>• {issue}</span>", unsafe_allow_html=True)
 
     selected_node = st.sidebar.selectbox(
         "Highlight node",
@@ -291,17 +444,30 @@ if analyze_clicked:
     for index, exp in enumerate(experiments):
 
         exp_name = exp.get("name", f"Experiment {index + 1}")
+        tested_model = exp.get("tested_model", {}) or {}
         manip    = exp.get("manipulated_variables", [])
         measured = exp.get("measured_variables", [])
 
         # Render experiment card with metadata row
         st.markdown(
-            f"<div style='margin-top:1.4rem;padding-bottom:2px;border-bottom:2px solid #1d4e8f'>"
-            f"<span style='font-family:Lora,Georgia,serif;font-size:1.05rem;font-weight:600;"
-            f"color:#1a1a2e'>{exp_name}</span></div>",
+            f"<div style='margin-top:1.2rem;background:#ffffff;border:1px solid #cbd5e1;"
+            "border-radius:10px;padding:0.75rem 0.85rem 0.55rem;'>"
+            f"<span style='font-family:Source Serif 4,Georgia,serif;font-size:1.08rem;font-weight:700;color:#1b2a42'>{exp_name}</span>"
+            "</div>",
             unsafe_allow_html=True,
         )
         meta_parts = []
+        model_name = tested_model.get("name")
+        model_family = tested_model.get("family")
+        if model_name and model_name != "unknown_model":
+            display_model = str(model_name).replace("_", " ")
+            if model_family and model_family != "unknown":
+                display_model = f"{display_model} ({str(model_family).replace('_', ' ')})"
+            meta_parts.append(
+                "<span style='color:#166534'><b>Tested model:</b></span> "
+                + f"<i>{display_model}</i>"
+            )
+
         if manip:
             meta_parts.append(
                 "<span style='color:#1d4e8f'><b>Manipulated:</b></span> "
@@ -314,7 +480,8 @@ if analyze_clicked:
             )
         if meta_parts:
             st.markdown(
-                "<div style='font-size:0.82rem;color:#444;margin:6px 0 10px'>"
+                "<div style='background:#ffffff;border:1px solid #cbd5e1;border-top:none;border-radius:0 0 10px 10px;"
+                "font-size:0.82rem;color:#334155;margin:-0.08rem 0 0.65rem;padding:0.58rem 0.85rem;line-height:1.55'>"
                 " &nbsp;|&nbsp; ".join(meta_parts) + "</div>",
                 unsafe_allow_html=True,
             )
@@ -325,12 +492,12 @@ if analyze_clicked:
             selected_node=selected_node,
         )
         chart_key = f"plot_{index}_{exp_name}"
-        st.plotly_chart(fig, use_container_width=True, key=chart_key)
+        st.plotly_chart(fig, width="stretch", key=chart_key)
 
         # Graph reading guide (collapsed by default)
         with st.expander("How to read this figure", expanded=False):
             st.markdown(
-                "<div style='font-size:0.82rem;color:#444;line-height:1.75'>"
+                "<div style='font-size:0.84rem;color:#0f172a;line-height:1.75'>"
                 "<b>Columns:</b> Inputs (left) · Model components (centre) · Outputs (right)<br>"
                 "<b>Arrows:</b> Solid = input→model link · Dotted = model→output link<br>"
                 "<b>Edge colour:</b> encodes relationship type (see legend in sidebar)<br>"
